@@ -550,14 +550,14 @@ class Metricks():
         iMin = []
 
         # Vector Input?
-        Nt = numpy.size(x)
+        Nt = numpy.size(x)-1
         if Nt != len(x):
             print("Entry must be a vector")
 
         # NaNs
         # https://www.mathworks.com/matlabcentral/answers/466615-what-is-an-equivalent-of-find-in-python
         iNan = numpy.argwhere(numpy.isnan(x))
-        indX = range(0, Nt-1)
+        indX = range(0, Nt)
         if len(iNan) != 0:
             indX[iNan] = []
             x[iNan] = []
@@ -574,12 +574,13 @@ class Metricks():
         a = numpy.argwhere(dx != 0)                     # Indexdes where x changes
         lm = numpy.argwhere(numpy.diff(a) != 1) + 1     # Indexes where a do not changes
         d = a[lm] - a[lm-1]                             # Number of elements in the flat peak
-        a[lm] = a[lm] - math.floor(d/2)                 # Save middle element
-        a[-1+1] = Nt
+        a[lm] = a[lm] - numpy.floor(d/2)                 # Save middle element
+        a = numpy.insert(a, Nt, Nt)
 
         # Peaks?
         xa = x[a]                               # Serie without flat peaks
-        b = (numpy.diff(xa) > 0)                # 1 => positive slopes (mimima begin)
+        b = (numpy.diff(xa) > 0)
+        b = b * 1                               # 1 => positive slopes (mimima begin)
                                                 # 0  =>  negative slopes (maxima begin)
         xb = numpy.diff(b)                      # -1 =>  maxima indexes (but one)
                                                 # +1 =>  minima indexes (but one)
@@ -608,20 +609,24 @@ class Metricks():
 
         # Maximum or minimum at the ends?
         if (nMaxi == 0):
-            iMax[0, 1] = [0, Nt]
+            iMax[0] = [0]
+            iMax[1] = [Nt]
         elif (nMini == 0):
-            iMin[0, 2] = [0, Nt]
+            iMin[0] = [0]
+            iMin[1] = [Nt]
         else:
             if iMax[0] < iMin[0]:
-                iMin[1, nMini+1] = iMin
+                for y in range(1, nMini+1):
+                    iMin[y] = iMin
                 iMin[0] = 1
             else:
-                iMax[1, nMaxi+1] = iMin
+                for z in range(1, nMaxi+1):
+                    iMax[z] = iMax
                 iMax[0] = 1
-            if iMax[-1] > iMin[-1]:
-                iMin[-1+1] = Nt
+            if iMax[len(iMax)] > iMin[len(iMax)]:
+                iMin[len(iMax)+1] = Nt
             else:
-                iMax[-1+1] = Nt
+                iMax[len(iMax)+1] = Nt
 
         xMax = x[iMax]
         xMin = x[iMin]
