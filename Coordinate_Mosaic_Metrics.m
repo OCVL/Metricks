@@ -141,11 +141,11 @@ path(path,fullfile(basePath,'lib')); % Add our support library to the path.
 
 [basepath] = uigetdir(pwd);
 
-[fnamelist, isdir ] = read_folder_contents(basepath,'csv');
-[fnamelisttxt, isdirtxt ] = read_folder_contents(basepath,'txt');
+[fnamelist, isadir ] = read_folder_contents(basepath,'csv');
+[fnamelisttxt, isadirtxt ] = read_folder_contents(basepath,'txt');
 
 fnamelist = [fnamelist; fnamelisttxt];
-isdir = [isdir;isdirtxt];
+isadir = [isadir;isadirtxt];
 
 
 liststr = {'microns (mm density)','degrees','arcmin'};
@@ -185,7 +185,7 @@ proghand = waitbar(0,'Processing...');
 for i=1:size(fnamelist,1)
 
     try
-        if ~isdir(i)
+        if ~isadir{i}
 
             
             if length(fnamelist{i})>42
@@ -198,14 +198,21 @@ for i=1:size(fnamelist,1)
             if isnan(scaleinput)
                 % Calculate the scale for this identifier.                                
                 LUTindex=find( cellfun(@(s) ~isempty(strfind(fnamelist{i},s )), lutData{1} ) );
-
-                % Use whichever scale is most similar to our filename.
-                sim = 1000*ones(length(LUTindex),1);
-                for l=1:length(LUTindex)
-                    sim(l) = lev(fnamelist{i}, lutData{1}{LUTindex(l)});
+                
+                % JG addition/bug fix 12/7/2022
+                % find the index for the file that matches id and eye info
+                for x=1:size(LUTindex, 1)
+                    val = LUTindex(x+1) - LUTindex(x);
+                    if x == size(LUTindex, 1) % if it is the last/only item in the LUT - if only matches with the eye and not subID will have axial length as NAN (would happen if LUT doesn't have info needed for this dataset)
+                        LUTindex = LUTindex(x);
+                        break
+                    end
+                    val = LUTindex(x+1) - LUTindex(x); % checking if there are two eyes from the same subject in LUT
+                    if val == 1
+                        LUTindex = LUTindex(x);
+                        break
+                    end
                 end
-                [~,simind]=min(sim);
-                LUTindex = LUTindex(simind);
                 
                 axiallength = lutData{2}(LUTindex);
                 pixelsperdegree = lutData{3}(LUTindex);
