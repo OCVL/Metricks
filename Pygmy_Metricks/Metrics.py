@@ -459,18 +459,17 @@ class Metricks():
 
                 # Only use the first peak that is higher than the mean height (designed to kill off the ER-level peaks)
                 # https://stackoverflow.com/questions/28512237/python-equivalent-to-matlab-a-b-sorty
-                self.maxesInds = self.maxesInds.sort(axis=1)
-                sortId = self.maxesInds.argsort(axis=1)
+                sortId = self.maxesInds.argsort(axis=0)
+                self.maxesInds.sort()
                 self.localMaxY = self.localMaxY[sortId]
                 localMaxX = localExtremeaBins[self.maxesInds]
-
                 meanDensity = mean(densityPerAnnulus)
                 for i in range(0,len(self.localMaxY)):
                     if self.localMaxY[i] >= meanDensity:
                         localMaxX = localMaxX[i]
                         self.localMaxY = self.localMaxY[i]
                         break
-                if len(localMaxX) != 0:
+                if bool(localMaxX):
                     estSpacing = localMaxX
                 else:
                     # If there aren't any peaks, pick the first peak that is above the mean density
@@ -485,15 +484,17 @@ class Metricks():
         else:
             estSpacing = scaledDrpSizes[1]
 
-        #PLOT something
+        #PLOT something?
 
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-    # Output List Formatting
-    # Make the returned struct
-    # if self.selectedUnit == 'Microns(mm density)':
-    #     self.totalCoordArea = self.totalCoordArea * 1000 ^ 2
+        # !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        # Output List Formatting
+        # Make the returned struct
+        if self.selectedUnit == 'Microns(mm density)':
+            self.totalCoordArea = self.totalCoordArea * 1000 ^ 2
 
-    # mosaicStats = ...
+        # mosaicStats = ...
+
+        # output the data
 
 
     def coordClip(self, coords, thresholdx, thresholdy, inoutorxor):
@@ -616,17 +617,13 @@ class Metricks():
             iMin[1] = [Nt]
         else:
             if iMax[0] < iMin[0]:
-                for y in range(1, nMini+1):
-                    iMin[y] = iMin
-                iMin[0] = 1
+                iMin = numpy.insert(iMin, 0, 0)
             else:
-                for z in range(1, nMaxi+1):
-                    iMax[z] = iMax
-                iMax[0] = 1
-            if iMax[len(iMax)] > iMin[len(iMax)]:
-                iMin[len(iMax)+1] = Nt
+                iMax = numpy.insert(iMax, 0, 0)
+            if iMax[len(iMax)-1] > iMin[len(iMax)-1]:
+                iMin = numpy.insert(iMin, len(iMin), Nt)
             else:
-                iMax[len(iMax)+1] = Nt
+                iMax = numpy.insert(iMax, len(iMax), Nt)
 
         xMax = x[iMax]
         xMin = x[iMin]
@@ -642,17 +639,16 @@ class Metricks():
         iMin = numpy.reshape(iMin, len(xMin))
 
         # Descending order:
-        temp = -iMax.sort(axis=1)
-        inMax = -iMax.argsort(axis=1)
+        inMax = (-xMax).argsort(axis=0)
         xMax = xMax[inMax]
         iMax = iMax[inMax]
-        xMin = xMin.sort(axis=1)
-        inMin = xMin.argsort(axis=1)
+        inMin = xMin.argsort(axis=0)
+        xMin = xMin.sort(axis=0)
         iMin = iMin[inMin]
 
 
-        # self.localMaxY = None
-        # self.maxesInds = None
+        self.localMaxY = xMax
+        self.maxesInds = iMax
 
 
     def PolyArea(self, x, y):
