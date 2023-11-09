@@ -90,6 +90,9 @@ close all force;
 
 WINDOW_SIZE = [];
 
+% If WINDOW_SIZE is not defined, the number of Voronoi cells to include before stopping the dynamic window creation.
+upper_bound = 150;
+
 %% Crop the coordinates/image to this size in [scale], and calculate the area from it.
 % If left empty, it uses the size of the image.
 basePath = which('Coordinate_Mosaic_Metrics.m');
@@ -220,7 +223,7 @@ for i=1:size(fnamelist,1)
                 
             else
                 
-                upper_bound = 150;
+                
                 
                 if upper_bound > size(coords,1)
                     upper_bound = size(coords,1);
@@ -278,7 +281,7 @@ for i=1:size(fnamelist,1)
             end
             disp('Determined window size.')
             %% Actually calculate the statistics
-            parfor c=1:size(coords,1)
+            for c=1:size(coords,1)
                 
                 rowborders = ceil([coords(c,2)-(pixelwindowsize(c)/2) coords(c,2)+(pixelwindowsize(c)/2)]);
                 colborders = ceil([coords(c,1)-(pixelwindowsize(c)/2) coords(c,1)+(pixelwindowsize(c)/2)]);
@@ -323,29 +326,23 @@ for i=1:size(fnamelist,1)
                                       
             interped_map=zeros([height width]);
             sum_map=zeros([height width]);
+            thisval = zeros([size(coords,1) 1]);
+            [Xq, Yq] = meshgrid(1:size(im,2), 1:size(im,1));
 
-            
             for c=1:size(coords,1)
 
-                    thisval = statistics{c}.(metriclist{selectedmetric}); 
-
-                    rowrange = ceil(coords(c,2)-(pixelwindowsize(c)/2):coords(c,2)+(pixelwindowsize(c)/2));
-                    colrange = ceil(coords(c,1)-(pixelwindowsize(c)/2):coords(c,1)+(pixelwindowsize(c)/2));
-
-                    rowrange(rowrange<1) =[];
-                    colrange(colrange<1) =[];
-                    rowrange(rowrange>height) =[];
-                    colrange(colrange>width) =[];
-                    
-                    interped_map(rowrange,colrange) = interped_map(rowrange,colrange) + thisval;
-                    sum_map(rowrange, colrange) = sum_map(rowrange, colrange) + 1;
+                thisval(c) = statistics{c}.(metriclist{selectedmetric}); 
 
             end
-                %
-
-            interped_map = interped_map./sum_map;
-
-            interped_map(isnan(interped_map)) =0;
+             
+            scattah = scatteredInterpolant(coords(:,1), coords(:,2), thisval);
+            interped_map = scattah(Xq,Yq);
+			smoothed_interped_map = imgaussfilt(interped_map,20);
+			
+			interped_map(isnan(interped_map)) =0;
+			smoothed_interped_map(isnan(smoothed_interped_map)) =0;
+			
+			
             dispfig=figure(1); imagesc(interped_map); axis image; colorbar;
             [minval, minind] = min(interped_map(:));
             [maxval, maxind] = max(interped_map(:));
@@ -364,9 +361,12 @@ for i=1:size(fnamelist,1)
             saveas(gcf,fullfile(basepath,'Results', [result_fname '_fig.png']));
             saveas(gcf,fullfile(basepath,'Results', [result_fname '_fig.svg']));
             
-            scaled_map = interped_map-min(interped_map(:));
+            scaled_map = smoothed_interped_map-min(smoothed_interped_map(:));
             scaled_map = uint8(255*scaled_map./max(scaled_map(:)));
-            imwrite(scaled_map, parula(256), fullfile(basepath,'Results', [result_fname '_raw.tif']))
+            imwrite(scaled_map, viridis(256), fullfile(basepath,'Results', [result_fname '_raw.tif']))
+
+			filename = fullfile(basepath,'Results',[subjectID{LUTindex} '_bounddensity_matrix_' date '.csv']);
+            writematrix(interped_map, filename);
 
             %%
         end
