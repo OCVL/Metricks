@@ -1,4 +1,4 @@
-function [ mosaic_stats ] = determine_mosaic_stats( coords, scale, unit, bounds ,clipped_row_col,reliability )
+function [ mosaic_stats ] = determine_mosaic_stats( coords, scale, scaledeg, unit, bounds , ignore_idx, reliability )
 % Robert Cooper 09-24-14
 % This function takes in a list of coordinates in a m-2 matrix, and
 % calculates the mean nearest neighbor, cell area created by the
@@ -6,11 +6,16 @@ function [ mosaic_stats ] = determine_mosaic_stats( coords, scale, unit, bounds 
 
 %% Coords are in X,Y!
 
+
+clipped_row_col = [bounds(2)-bounds(1) bounds(4)-bounds(3)];
+
+clipped_coords = coordclip(coords,bounds(1:2),bounds(3:4),'i');
+
 %%%%%%%%%%%%%%%%%%%%%%%%
 %% Determine Mean N-N %%
 %%%%%%%%%%%%%%%%%%%%%%%%
 
-dist_between_pts=pdist2(coords,coords); % Measure the distance from each set of points to the other
+dist_between_pts=pdist2(clipped_coords,clipped_coords); % Measure the distance from each set of points to the other
 max_ident=eye(length(dist_between_pts)).*max(dist_between_pts(:)); % Make diagonal not the minimum for any observation
 
 [minval minind]=min(dist_between_pts+max_ident); % Find the minimum distance from one set of obs to another
@@ -26,24 +31,23 @@ regularity_nn_index = mean_nn_dist/std(minval.*scale);
 %% Determine Voronoi Cell Area %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 sixsided=0;
-bound = zeros(size(coords,1),1);
+bound = false(size(coords,1),1);
 cellarea = zeros(size(coords,1),1);
 numedges = zeros(size(coords,1),1);
-coords_bound=[];
 
 if size(coords,1) > 2
 
     [V,C] = voronoin(coords,{'QJ'}); % Returns the vertices of the Voronoi edges in VX and VY so that plot(VX,VY,'-',X,Y,'.')
-
+    fastbound = (V(:,1)<bounds(2) & V(:,1)>bounds(1) & V(:,2)<bounds(4) & V(:,2)>bounds(3));
+    
     % figure(10); hold on;
     for i=1:length(C)
 
         vertices=V(C{i},:);
+      
+        if all(fastbound(C{i})) && all(i ~= ignore_idx) && all(C{i}~=1)  
 
-        if (all(C{i}~=1)  && all(vertices(:,1)<bounds(2)) && all(vertices(:,2)<bounds(4)) ... % [xmin xmax ymin ymax] 
-                         && all(vertices(:,1)>bounds(1)) && all(vertices(:,2)>bounds(3))) 
-
-            cellarea(i) = polyarea(V(C{i},1),V(C{i},2));
+            cellarea(i) = polyarea(vertices(:,1),vertices(:,2));
 
             % Code to display number of sides for each voronoi domain
             numedges(i)=size(V(C{i},1),1);
@@ -62,14 +66,12 @@ if size(coords,1) > 2
     %             case 9
     %                 color = 'b';
             end
-    %         figure(10);
-    %         patch(V(C{i},1),V(C{i},2),ones(size(V(C{i},1))),'FaceColor',color);
-    %         hold on;
+            % figure(10);
+            % patch(V(C{i},1),V(C{i},2),ones(size(V(C{i},1))),'FaceColor',color);
+            % hold on;
 
-            coords_bound(i,:) = coords(i,:);
-            bound(i) = 1;
+            bound(i) = true;
         end
-
 
     end
 
@@ -78,8 +80,9 @@ end
 % toc
 % figure(2);
 % voronoi(coords(:,1),coords(:,2));
-if ~isempty(coords_bound)
-    coords_bound=coords_bound(coords_bound(:,1)~=0,:); % Clip out the unbounded cells
+if sum(bound) ~= 0
+    coords_bound= coords(bound,:); % Clip out the unbounded cells
+    cellarea_deg = cellarea((cellarea~=0)).*(scaledeg.^2);
     cellarea= cellarea((cellarea~=0)).*(scale.^2); % Clip out unbounded cells, convert to square microns
     numedges = numedges(numedges~=0);
     
@@ -102,11 +105,12 @@ end
 %% Determine Number of Cells, Density Direct Count (D_dc) %%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
-numcells=length(coords); % Total number of cells
+numcells=length(clipped_coords); % Total number of cells
 total_cell_area=sum(cellarea); % Total cell area in units
+total_cell_area_deg = sum(cellarea_deg);
 
 if strcmp(unit,'microns (mm density)')
-    total_coord_area=((clipped_row_col(1)*clipped_row_col(2))*((scale^2)/(1000^2)));    
+    total_coord_area=((clipped_row_col(1)*clipped_row_col(2))*((scale^2)/(1000^2))); 
 else
     total_coord_area=((clipped_row_col(1)*clipped_row_col(2))*((scale^2)));    
 end
@@ -117,8 +121,10 @@ density_dc=numcells/total_coord_area; % cells/mm^2
 if ~isempty(coords_bound)
     if strcmp(unit,'microns (mm density)')
         density_bound = (1000^2)*size(coords_bound,1)./total_cell_area;
+        density_bound_deg = size(coords_bound,1)./total_cell_area_deg;
     else
         density_bound = size(coords_bound,1)./total_cell_area;
+        density_bound_deg = size(coords_bound,1)./total_cell_area;
     end
 else
     density_bound = 0;
@@ -130,21 +136,49 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-m=1;
-inter_cell_dist = [];
-max_cell_dist = [];
+inter_cell_dist = zeros(size(clipped_coords,1),1);
+max_cell_dist = zeros(size(clipped_coords,1),1);
 
-correct_inter_cell_dist = zeros(size(coords,1),1);
-correct_max_cell_dist = zeros(size(coords,1),1);
-correct_nn_cell_dist = zeros(size(coords,1),1);
+correct_inter_cell_dist = zeros(sum(bound),1);
+correct_max_cell_dist = zeros(sum(bound),1);
+correct_nn_cell_dist = zeros(sum(bound),1);
 if size(coords,1) > 2
-    dt = DelaunayTri(coords);
 
-    % Find all instances of each coordinate point
-    for k=1 : size(coords,1)
+    dt = DelaunayTri(coords);    
 
+    % Find all instances of each bound cell.
+    boundinds = find(bound);
+    for k=1:numel(boundinds)
 
-        [i j] =find(dt.Triangulation == k);
+        % If its bound, then we've flagged it as such, and can use it in the triangulation
+        % Only take the first row because that is the cell of interest's
+        % relative distance to its neighboring cells
+        ind = boundinds(k);
+
+        [i, j] =find(dt.Triangulation == ind);
+
+        conn_ind = dt.Triangulation(i,:);
+
+        coord_row = unique(conn_ind( conn_ind ~= ind)); % Find all of the unique coordinate points that isn't the "center" coordinate
+
+        if(size(i,1)~=1)
+            coord_row = [ind; coord_row]; % Add the "center" to the top, so we know the order for the distances
+        else
+            coord_row = [ind; coord_row']; 
+        end
+
+        cell_dist = squareform(pdist([coords(coord_row,1) coords(coord_row,2)]));
+            
+        correct_inter_cell_dist(k) = scale*(sum(cell_dist(1,:)) / (length(cell_dist(1,:))-1));
+        correct_max_cell_dist(k)   = scale*max(cell_dist(1,:));
+        correct_nn_cell_dist(k)    = scale*min(cell_dist(1,2:end));        
+    end
+
+    % Repeat the above, but with all cells in the unbound region..
+    dt = DelaunayTri(clipped_coords);
+    for k=1:size(clipped_coords,1)
+
+        [i, j] =find(dt.Triangulation == k);
 
         conn_ind = dt.Triangulation(i,:);
 
@@ -158,21 +192,11 @@ if size(coords,1) > 2
 
         cell_dist = squareform(pdist([coords(coord_row,1) coords(coord_row,2)]));
 
-        if bound(k) == 1 % If its bound, then we've flagged it as such, and can use it in the triangulation
-            % Only take the first row because that is the cell of interest's
-            % relative distance to its neighboring cells
-            correct_inter_cell_dist(m) = scale*(sum(cell_dist(1,:)) / (length(cell_dist(1,:))-1));
-            correct_max_cell_dist(m)   = scale*max(cell_dist(1,:));
-            correct_nn_cell_dist(m)    = scale*min(cell_dist(1,2:end));
-    %         figure(1); triplot(dt); hold on; plot(coords(coord_row,1),coords(coord_row,2),'r.'); plot(coords(k,1),coords(k,2),'g.');  hold off;
-            m = m+1;
-        end
-
-        inter_cell_dist = [inter_cell_dist; scale*(sum(cell_dist(1,:)) / (length(cell_dist(1,:))-1))];
-        max_cell_dist   = [max_cell_dist; scale*max(cell_dist(1,:))];    
-
+        inter_cell_dist(k) = scale*(sum(cell_dist(1,:)) / (length(cell_dist(1,:))-1));
+        max_cell_dist(k)   = scale*max(cell_dist(1,:));
     end
-    m = m-1;
+
+
     mean_inter_cell_dist = mean(inter_cell_dist);    
     mean_max_cell_dist   = mean( max_cell_dist );
 else
@@ -181,10 +205,10 @@ else
 end
     
 if ~isempty(coords_bound)
-    mean_correct_nn_dist = mean( correct_nn_cell_dist(1:m) );
-    mean_correct_inter_cell_dist = mean(correct_inter_cell_dist(1:m));
-    regularity_ic_index = mean(correct_inter_cell_dist(1:m))./std(correct_inter_cell_dist(1:m));
-    mean_correct_max_cell_dist   = mean( correct_max_cell_dist(1:m) );    
+    mean_correct_nn_dist = mean( correct_nn_cell_dist );
+    mean_correct_inter_cell_dist = mean(correct_inter_cell_dist);
+    regularity_ic_index = mean(correct_inter_cell_dist)./std(correct_inter_cell_dist);
+    mean_correct_max_cell_dist   = mean( correct_max_cell_dist );    
     
 else
     regularity_ic_index = 0;
@@ -193,12 +217,13 @@ else
     mean_correct_max_cell_dist=0;
 end
 
+
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %% Determine Density Recovery Profile %% 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 
-[ density_per_rad, um_drp_sizes, drp_spac]=calculate_DRP(coords, [bounds(1:2); bounds(3:4)], scale, pixel_density, reliability );
+%[ density_per_rad, um_drp_sizes, drp_spac]=calculate_DRP(coords, [bounds(1:2); bounds(3:4)], scale, pixel_density, reliability );
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%  Estimate OS Length (Wilk et al.)  %%

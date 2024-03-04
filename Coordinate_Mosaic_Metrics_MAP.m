@@ -89,13 +89,14 @@ clear;
 close all force;
 
 WINDOW_SIZE = [];
-
-% If WINDOW_SIZE is not defined, the number of Voronoi cells to include before stopping the dynamic window creation.
-upper_bound = 150;
+upper_bound = 150; %this is the number of BOUND cells to include
+TRIM = true; % Set to true if you want to trim the outer cells until the number of cells is exactly the upper bound.
 
 %% Crop the coordinates/image to this size in [scale], and calculate the area from it.
 % If left empty, it uses the size of the image.
-basePath = which('Coordinate_Mosaic_Metrics.m');
+
+
+basePath = which('Coordinate_Mosaic_Metrics_MAP.m');
 
 [basePath ] = fileparts(basePath);
 path(path,fullfile(basePath,'lib')); % Add our support library to the path.
@@ -103,10 +104,10 @@ path(path,fullfile(basePath,'lib')); % Add our support library to the path.
 [basepath] = uigetdir(pwd);
 
 [fnamelist, isadir ] = read_folder_contents(basepath,'csv');
-[fnamelisttxt, isadirtxt ] = read_folder_contents(basepath,'txt');
+[fnamelisttxt, isdirtxt ] = read_folder_contents(basepath,'txt');
 
 fnamelist = [fnamelist; fnamelisttxt];
-isadir = [isadir;isadirtxt];
+isadir = [isadir;isdirtxt];
 
 liststr = {'microns (mm density)','degrees','arcmin'};
 [selectedunit, oked] = listdlg('PromptString','Select output units:',...
@@ -215,30 +216,34 @@ for i=1:size(fnamelist,1)
                 maxcolval = max(coords(:,1));
             end
 
-                statistics = cell(size(coords,1),1);
+            statistics = cell(size(coords,1),1);
             
             if ~isempty(WINDOW_SIZE)
                 
                 pixelwindowsize = repmat(WINDOW_SIZE/scaleval,size(coords,1),1);
                 
             else
-                
-                
-                
+                                                
                 if upper_bound > size(coords,1)
                     upper_bound = size(coords,1);
                 end
                 
                 % Determine the window size dynamically for each coordinate
                 pixelwindowsize = zeros(size(coords,1),1);
+                numbound = zeros(size(coords,1),1);
+                trimlist = cell(size(coords,1), 1);
 
-                parfor c=1:size(coords,1)
-
+                
+                [V,C] = voronoin(coords,{'QJ'}); % Returns the vertices of the Voronoi edges in VX and VY so that plot(VX,VY,'-',X,Y,'.')
+                tic;
+                parfor c=1:size(coords,1)                                   
+                    
+                                        
+                    % Stupid simple optimzation- first make big jumps 
+                    
                     thiswindowsize=1;
-                    clipped_coords=[];
-                    numbound=0;
-                    while numbound < upper_bound
-                        thiswindowsize = thiswindowsize+1;
+                    while numbound(c) < upper_bound
+                        thiswindowsize = thiswindowsize+10;
                         rowborders = ([coords(c,2)-(thiswindowsize/2) coords(c,2)+(thiswindowsize/2)]);
                         colborders = ([coords(c,1)-(thiswindowsize/2) coords(c,1)+(thiswindowsize/2)]);
 
@@ -246,93 +251,226 @@ for i=1:size(fnamelist,1)
                         colborders(colborders<1) =1;
                         rowborders(rowborders>maxrowval) =maxrowval;
                         colborders(colborders>maxcolval) =maxcolval;
-
-                        clipped_coords =coordclip(coords,colborders,...
-                                                         rowborders,'i');
-                        if size(clipped_coords,1) > 5
-                            % Next, create voronoi diagrams from the cells we've clipped.                             
-                            [V,C] = voronoin(clipped_coords,{'QJ'}); % Returns the vertices of the Voronoi edges in VX and VY so that plot(VX,VY,'-',X,Y,'.')
-
-%                             figure(10);
-%                             clf;hold on;
-
+                        
+                        % Ensure we're working with bound cells only.
+                        if size(coords,1) > 5
+                             % Next, create voronoi diagrams from the cells we've clipped.                             
+                             
                             bound = zeros(length(C),1);
+
+                            fastbound = (V(:,1)<colborders(2) & V(:,1)>colborders(1) & V(:,2)<rowborders(2) & V(:,2)>rowborders(1));
+                            
                             for vc=1:length(C)
+                                bound(vc)=all(fastbound(C{vc}));
+                            end                            
 
-                                vertices=V(C{vc},:);
+                            numbound(c) = sum(bound);
+                        end
+                    end
+                    
 
-                                if (all(C{vc}~=1)  && all(vertices(:,1)<colborders(2)) && all(vertices(:,2)<rowborders(2)) ... % [xmin xmax ymin ymax] 
-                                                 && all(vertices(:,1)>colborders(1)) && all(vertices(:,2)>rowborders(1))) 
-                                    bound(vc) = 1;
-                                    
-%                                     patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','b');                                   
-%                                 else                                    
-%                                     patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','r');                                    
-                                end
-                            end
+                    % Then walk it back until we're below the bound
+                    while numbound(c) > upper_bound
+                        thiswindowsize = thiswindowsize-1;
+                        rowborders = ([coords(c,2)-(thiswindowsize/2) coords(c,2)+(thiswindowsize/2)]);
+                        colborders = ([coords(c,1)-(thiswindowsize/2) coords(c,1)+(thiswindowsize/2)]);
 
-                            numbound = sum(bound);
+                        rowborders(rowborders<1) =1;
+                        colborders(colborders<1) =1;
+                        rowborders(rowborders>maxrowval) =maxrowval;
+                        colborders(colborders>maxcolval) =maxcolval;
+                        
+                        % Ensure we're working with bound cells only.
+                        if size(coords,1) > 5                        
+                             
+                            bound = zeros(length(C),1);
+
+                            fastbound = (V(:,1)<colborders(2) & V(:,1)>colborders(1) & V(:,2)<rowborders(2) & V(:,2)>rowborders(1));
+                            
+                            for vc=1:length(C)
+                                bound(vc)=all(fastbound(C{vc}));
+                            end  
+ 
+                            numbound(c) = sum(bound);
+                        end
+                    end    
+                    
+                    pixelwindowsize(c) = thiswindowsize;                 
+
+                    if TRIM && numbound(c) ~= upper_bound
+                        
+                        % figure(1); clf;
+                        % axis([colborders rowborders])
+                        % hold on;
+                        pixelwindowsize(c) = pixelwindowsize(c)+1;                 
+                        rowborders = ([coords(c,2)-(pixelwindowsize(c)/2) coords(c,2)+(pixelwindowsize(c)/2)]);
+                        colborders = ([coords(c,1)-(pixelwindowsize(c)/2) coords(c,1)+(pixelwindowsize(c)/2)]);
+
+                        rowborders(rowborders<1) =1;
+                        colborders(colborders<1) =1;
+                        rowborders(rowborders>maxrowval) =maxrowval;
+                        colborders(colborders>maxcolval) =maxcolval;
+
+                        bound = zeros(length(C),1);
+                        fastbound = (V(:,1)<colborders(2) & V(:,1)>colborders(1) & V(:,2)<rowborders(2) & V(:,2)>rowborders(1));
+                        for vc=1:length(C)
+
+                            bound(vc)=all(fastbound(C{vc}));
+
+                            % if bound(vc)
+%                                 patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','green');                                
+%                              else
+%                                  patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','blue');
+                            % end
                         end
 
+                        numbound(c) = sum(bound);
+                        % title('OG')
+
+                        stepback= pixelwindowsize(c)-1;
+                        rowborders = ([coords(c,2)-(stepback /2) coords(c,2)+(stepback /2)]);
+                        colborders = ([coords(c,1)-(stepback /2) coords(c,1)+(stepback /2)]);
+
+                        rowborders(rowborders<1) =1;
+                        colborders(colborders<1) =1;
+                        rowborders(rowborders>maxrowval) =maxrowval;
+                        colborders(colborders>maxcolval) =maxcolval;
+
+                        % Next, create voronoi diagrams from the cells we've clipped.                                                                              
+                         % figure(2); clf;
+                         % axis([colborders rowborders])
+                         % hold on;
+                         
+                        fastbound = (V(:,1)<colborders(2) & V(:,1)>colborders(1) & V(:,2)<rowborders(2) & V(:,2)>rowborders(1));
+                        for vc=1:length(C)
+
+                            bound(vc)=bound(vc)+all(fastbound(C{vc}));
+
+                             % if bound(vc) == 2
+                             %     patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','green');
+                             % elseif bound(vc) == 1
+                             %     patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','red');
+                             % else
+                             %     patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','blue');
+                             % end
+                         end
+                        % axis([colborders rowborders])
+                        % title('Overage')
+                        
+                        ignoreindx = find(bound == 1);
+                        % Randomly choose which of the cells to keep from the last iteration to meet the upper bound defined above.
+                        toremove = randperm(length(ignoreindx), numbound(c)-upper_bound); 
+                        ignoreindx = ignoreindx(toremove);
+
+%                         disp(['Need to remove ' num2str(numbound(c)-upper_bound) ' cells to match ' num2str(upper_bound) '.'])
+                        % 
+                        % rowborders = ([coords(c,2)-(pixelwindowsize(c) /2) coords(c,2)+(pixelwindowsize(c) /2)]);
+                        % colborders = ([coords(c,1)-(pixelwindowsize(c) /2) coords(c,1)+(pixelwindowsize(c) /2)]);
+                        % 
+                        % rowborders(rowborders<1) =1;
+                        % colborders(colborders<1) =1;
+                        % rowborders(rowborders>maxrowval) =maxrowval;
+                        % colborders(colborders>maxcolval) =maxcolval;
+                        % bound = zeros(length(C),1);
+                        % figure(3);clf;
+                        %  axis([colborders rowborders])
+                        %  hold on;
+                        % 
+                        %  for vc=1:length(C)
+                        % 
+                        %      vertices=V(C{vc},:);
+                        % 
+                        %      if (all(C{vc}~=1)  && all(vertices(:,1)<colborders(2)) && all(vertices(:,2)<rowborders(2)) ... % [xmin xmax ymin ymax] 
+                        %                       && all(vertices(:,1)>colborders(1)) && all(vertices(:,2)>rowborders(1))) && all(vc ~= ignoreindx)
+                        %          patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','green');
+                        %      else
+                        %          patch(V(C{vc},1),V(C{vc},2),ones(size(V(C{vc},1))),'FaceColor','blue');
+                        %      end
+                        %  end
+                        %  drawnow;
+                        % axis([colborders rowborders])
+                        % title('Trimmed')
+                        % pause;
+
+                        trimlist{c} = ignoreindx;
+                        numbound(c) = upper_bound;
                     end
-%                     axis([colborders rowborders])
-                    pixelwindowsize(c) = thiswindowsize;
                 end
             end
+            toc;
             disp('Determined window size.')
+            
             %% Actually calculate the statistics
+            comp_table = [];
+
+            % Pre-fill the struct
             for c=1:size(coords,1)
+                statistics{c} = struct('Number_Unbound_Cells', -1,'Number_Bound_Cells', 0, 'Total_Area', 0, 'Total_Bound_Area',0,...                      
+                      'Bound_Density',0, 'Bound_NN_Distance',0,'Bound_IC_Distance',0,'Bound_Furthest_Distance',0,...
+                      'Bound_Mean_Voronoi_Area', 0,'Bound_Percent_Six_Sided_Voronoi',0,'Unbound_DRP_Distance', 0,...
+                      'Bound_Voronoi_Area_RI',0,'Bound_Voronoi_Sides_RI',0, 'Bound_NN_RI', 0, 'Bound_IC_RI', 0,...
+                      'Unbound_Density', 0 ,'Unbound_NN_Distance', 0, 'Unbound_IC_Distance',0, 'Unbound_Furthest_Distance',0, 'Bound_Density_DEG',0);
+            end
+
+
+            tic;
+            parfor c=1:size(coords,1)
                 
-                rowborders = ceil([coords(c,2)-(pixelwindowsize(c)/2) coords(c,2)+(pixelwindowsize(c)/2)]);
-                colborders = ceil([coords(c,1)-(pixelwindowsize(c)/2) coords(c,1)+(pixelwindowsize(c)/2)]);
+                rowborders = ([coords(c,2)-(pixelwindowsize(c)/2) coords(c,2)+(pixelwindowsize(c)/2)]); 
+                colborders = ([coords(c,1)-(pixelwindowsize(c)/2) coords(c,1)+(pixelwindowsize(c)/2)]);
 
                 rowborders(rowborders<1) =1;
                 colborders(colborders<1) =1;
                 rowborders(rowborders>maxrowval) =maxrowval;
                 colborders(colborders>maxcolval) =maxcolval;
                 
-                clipped_coords =coordclip(coords,colborders,...
-                                                 rowborders,'i');
                 % [xmin xmax ymin ymax] 
                 clip_start_end = [colborders rowborders];
-                
-                statistics{c} = determine_mosaic_stats( clipped_coords, scaleval, selectedunit, clip_start_end ,[colborders(2)-colborders(1) rowborders(2)-rowborders(1)], 4 );
-                statistics{c}.Window_Size = pixelwindowsize(c)*scaleval;
-                %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-                % Determine FFT Power Spectra %%
-                %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%                 if (exist('fit_fourier_spacing.m','file') == 2) && exist(fullfile(basepath, [fnamelist{i}(1:end-length('_coords.csv')) '.tif']), 'file')==2
-%                     [pixel_spac, interped_map] = fit_fourier_spacing(im);
-%                     statistics{c}.DFT_Spacing = pixel_spac*scaleval;                
-%                 end
+                               
 
+                statistics{c} = determine_mosaic_stats( coords, scaleval, scaleval_deg, selectedunit, clip_start_end , ...
+                                                        trimlist{c}, 4 );
+                
+                statistics{c}.Window_Size = pixelwindowsize(c)*scaleval;
+
+
+                if statistics{c}.Number_Bound_Cells ~= numbound(c)                    
+                    warning(['Warning! Mismatch between how many bound cells we expected (' num2str(numbound(c)) ') and how many we had (' num2str(statistics{c}.Number_Bound_Cells) '!'])
+                    pause;
+                end
 
                 warning off;
                 [ success ] = mkdir(basepath,'Results');
                 warning on;
-            
             end
-           
+           toc;
+
+           % Validate that we actually ran all cells by checking to make
+           % sure the number of unbound cells isn't still -1.
+           for c=1:size(coords,1)
+                if statistics{c}.Number_Unbound_Cells == -1
+                    warning('At least one cell failed to analyze!')
+                end
+           end
             
             %% Map output
             metriclist = fieldnames(statistics{1});
             [selectedmetric, oked] = listdlg('PromptString','Select map metric:',...
-                                          'SelectionMode','single',...
-                                          'ListString',metriclist);
-            
+                                            'SelectionMode','single',...
+                                            'ListString',metriclist);
+              
             if oked == 0
-                error('Cancelled by user.');
+                 error('Cancelled by user.');
             end
-                                      
+
             interped_map=zeros([height width]);
             sum_map=zeros([height width]);
             thisval = zeros([size(coords,1) 1]);
             [Xq, Yq] = meshgrid(1:size(im,2), 1:size(im,1));
 
+
             for c=1:size(coords,1)
-
-                thisval(c) = statistics{c}.(metriclist{selectedmetric}); 
-
+                thisval(c) = statistics{c}.(metriclist{selectedmetric});
             end
              
             scattah = scatteredInterpolant(coords(:,1), coords(:,2), thisval);
@@ -341,9 +479,11 @@ for i=1:size(fnamelist,1)
 			
 			interped_map(isnan(interped_map)) =0;
 			smoothed_interped_map(isnan(smoothed_interped_map)) =0;
-			
-			
-            dispfig=figure(1); imagesc(interped_map); axis image; colorbar;
+                
+            dispfig=figure(1); 
+            imagesc(interped_map); 
+            axis image;
+            colorbar; 
             [minval, minind] = min(interped_map(:));
             [maxval, maxind] = max(interped_map(:));
             
@@ -353,22 +493,25 @@ for i=1:size(fnamelist,1)
             max_x_vals = maxcol;
             max_y_vals = maxrow;
             
+            subjectID = lutData{1};% extract subject ID; added by Katie Litts in 2019
+            disp([subjectID{LUTindex} ' Maximum value: ' num2str(round(maxval)) '(' num2str(maxcol) ',' num2str(maxrow) ')' ]) % display added by Katie Litts in 2019
+                       
             title(['Minimum value: ' num2str(minval) '(' num2str(mincol) ',' num2str(minrow) ') Maximum value: ' num2str(maxval) '(' num2str(maxcol) ',' num2str(maxrow) ')'])
-            
             
             result_fname = [fnamelist{i}(1:end-4) '_bound_map_' date '_' num2str(WINDOW_SIZE) metriclist{selectedmetric}];
             
             saveas(gcf,fullfile(basepath,'Results', [result_fname '_fig.png']));
-            saveas(gcf,fullfile(basepath,'Results', [result_fname '_fig.svg']));
+			saveas(gcf,fullfile(basepath,'Results', [result_fname '_fig.svg']));
+   
+            scaled_map = interped_map-min(clims);
+            scaled_map(scaled_map <0) =0; %in case there are min values below this
+            scaled_map = uint8(255*scaled_map./(max(clims)-min(clims)));
+            scaled_map(scaled_map  >255) = 255; %in case there are values above this
+            imwrite(scaled_map, vmap, fullfile(basepath,'Results',[result_fname '_raw.tif']));
             
-            scaled_map = smoothed_interped_map-min(smoothed_interped_map(:));
-            scaled_map = uint8(255*scaled_map./max(scaled_map(:)));
-            imwrite(scaled_map, viridis(256), fullfile(basepath,'Results', [result_fname '_raw.tif']))
-
-			filename = fullfile(basepath,'Results',[subjectID{LUTindex} '_bounddensity_matrix_' date '.csv']);
-            writematrix(interped_map, filename);
-
-            %%
+            %save matrix as matfile
+            save(fullfile(basepath,'Results',[subjectID{LUTindex} '_bounddensity_matrix_MATFILE_' date '.mat']), "interped_map");
+    
         end
     catch ex
         warning(['Unable to analyze ' fnamelist{i} ':']);
