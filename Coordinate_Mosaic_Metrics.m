@@ -369,7 +369,7 @@ for i=1:size(fnamelist,1)
                 end
 
                 % Write the file we've worked on as the first column
-                fprintf(fid,'%s', fnamelist{i});
+                fprintf(fid,'%s', strrep(fnamelist{1},',','-'));
 
                 for k=1:size(datafields,1)
     %                 fields{k}
